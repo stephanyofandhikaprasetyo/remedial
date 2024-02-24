@@ -15,15 +15,21 @@ class MyApp extends StatelessWidget {
   }
 }
 
+class AngkaObject {
+  final String value;
+  late Map<int, Color?> coloredNumbers;
+
+  AngkaObject(this.value);
+}
+
 class MyHomePage extends StatefulWidget {
   @override
   _MyHomePageState createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  late List<String> angkaAcak;
+  late List<AngkaObject> angkaAcak = [];
   int activeColorIndex = 0;
-  Map<String, Map<int, Color?>> coloredNumbers = {};
   late SharedPreferences prefs;
 
   final List<Color> warna = [
@@ -33,6 +39,9 @@ class _MyHomePageState extends State<MyHomePage> {
     Colors.brown,
     Colors.orange,
   ];
+
+  DateTime lastTapTime = DateTime.now();
+  AngkaObject? lastTappedObject;
 
   @override
   void initState() {
@@ -46,41 +55,41 @@ class _MyHomePageState extends State<MyHomePage> {
     loadColoredNumbersFromPrefs();
   }
 
-
   Future<void> loadColoredNumbersFromPrefs() async {
-    for (String angka in angkaAcak) {
-      coloredNumbers[angka] = {};
+    angkaAcak = angkaAcak.map((angkaObj) {
+      angkaObj.coloredNumbers = {};
       for (int i = 0; i < warna.length; i++) {
-        String key = 'colored_${angka}_$i';
+        String key = 'colored_${angkaObj.value}_$i';
         if (prefs.containsKey(key)) {
           int? colorIndex = prefs.getInt(key);
-          coloredNumbers[angka]![i] = warna[colorIndex ?? 0];
+          angkaObj.coloredNumbers[i] = warna[colorIndex ?? 0];
         } else {
-          coloredNumbers[angka]![i] = null; // Handle null case
+          angkaObj.coloredNumbers[i] = null; // Handle null case
         }
       }
-    }
+      return angkaObj;
+    }).toList();
     setState(() {}); // Update the UI after loading colored numbers
   }
 
-  Future<void> saveColoredNumberToPrefs(String angka, int colorIndex) async {
-    coloredNumbers[angka] ??= {};
-    coloredNumbers[angka]![colorIndex] = warna[colorIndex];
+  Future<void> saveColoredNumberToPrefs(AngkaObject angkaObj, int colorIndex) async {
+    angkaObj.coloredNumbers[colorIndex] = warna[colorIndex];
 
-    String key = 'colored_${angka}_$colorIndex';
+    String key = 'colored_${angkaObj.value}_$colorIndex';
     await prefs.setInt(key, colorIndex);
   }
 
   void checkAndShowResult() {
-    bool allColored = coloredNumbers.values.every((colorMap) {
-      return colorMap != null && colorMap.values.any((color) => color != null);
+    bool allColored = angkaAcak.every((angkaObj) {
+      return angkaObj.coloredNumbers.values.any((color) => color != null);
     });
 
     if (allColored) {
-      String result = coloredNumbers.keys.map((angka) {
-        int selectedColorIndex = coloredNumbers[angka]!.keys.firstWhere((index) =>
-        coloredNumbers[angka]![index] == warna[activeColorIndex]);
-        return '$angka($selectedColorIndex)';
+      String result = angkaAcak.map((angkaObj) {
+        int selectedColorIndex = angkaObj.coloredNumbers.keys.firstWhere(
+              (index) => angkaObj.coloredNumbers[index] == warna[activeColorIndex],
+        );
+        return '${angkaObj.value}($selectedColorIndex)';
       }).join(", ");
       showDialog(
         context: context,
@@ -113,19 +122,22 @@ class _MyHomePageState extends State<MyHomePage> {
 
   void showScore() {
     int score = 0;
-    bool allColoredGreen = coloredNumbers.entries.every(
-          (entry) =>
-      entry.key == '3' &&
-          entry.value.values.any((color) => color == Colors.green),
+
+    bool allColoredGreen = angkaAcak.every(
+          (angkaObj) => angkaObj.value == '3' && angkaObj.coloredNumbers[2] == Colors.green,
     );
 
     if (allColoredGreen) {
-      score = 100;
+      score = 100; // Max score if all '3' are green
     } else {
-      for (int i = 0; i < angkaAcak.length; i++) {
-        if (coloredNumbers[angkaAcak[i]]![activeColorIndex] ==
-            warna[activeColorIndex]) {
-          score += int.parse(angkaAcak[i]);
+      for (AngkaObject angkaObj in angkaAcak) {
+        if (angkaObj.value != '3' && angkaObj.coloredNumbers[2] == Colors.green) {
+          // Skip if it's not '3' and colored green
+          continue;
+        }
+
+        if (angkaObj.coloredNumbers[activeColorIndex] == warna[activeColorIndex]) {
+          score += (angkaObj.value == '3') ? 10 : int.parse(angkaObj.value);
         }
       }
     }
@@ -203,45 +215,48 @@ class _MyHomePageState extends State<MyHomePage> {
                   child: Wrap(
                     spacing: 8.0,
                     runSpacing: 8.0,
-                    children: [
-                      for (String angka in angkaAcak)
-                        for (int i = 0; i < warna.length; i++)
-                          GestureDetector(
-                            onTap: () {
-                              String selectedNumber = angka;
+                    children: angkaAcak.map((AngkaObject angkaObj) {
+                      return GestureDetector(
+                        onTap: () {
+                          int colorIndex = prefs.getInt('colored_${angkaObj.value}_$activeColorIndex') ?? 0;
 
-                              int colorIndex = prefs.getInt('colored_${selectedNumber}_$i') ?? 0;
+                          Duration timeBetweenTaps = DateTime.now().difference(lastTapTime);
 
-                              // Toggle warna karakter yang diklik
-                              if (coloredNumbers[selectedNumber]![i] ==
-                                  warna[colorIndex]) {
-                                coloredNumbers[selectedNumber]![i] = null;
-                                saveColoredNumberToPrefs(
-                                    selectedNumber, i); // Simpan warna ke Shared Preferences
-                              } else {
-                                coloredNumbers[selectedNumber]![i] =
-                                (selectedNumber == '3' && i == activeColorIndex)
-                                    ? Colors.green
-                                    : warna[activeColorIndex];
-                                saveColoredNumberToPrefs(
-                                    selectedNumber, activeColorIndex); // Simpan warna ke Shared Preferences
-                              }
+                          if (timeBetweenTaps < Duration(milliseconds: 500) &&
+                              lastTappedObject == angkaObj) {
+                            angkaObj.coloredNumbers[activeColorIndex] = null;
+                            saveColoredNumberToPrefs(
+                              angkaObj,
+                              activeColorIndex,
+                            );
+                          } else {
+                            angkaObj.coloredNumbers[activeColorIndex] =
+                            (angkaObj.value == '3' && activeColorIndex == 2)
+                                ? Colors.green
+                                : warna[activeColorIndex];
+                            saveColoredNumberToPrefs(
+                              angkaObj,
+                              activeColorIndex,
+                            );
+                          }
 
-                              setState(() {});
-                            },
-                            child: Container(
-                              padding: EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: coloredNumbers[angka]![i],
-                                borderRadius: BorderRadius.circular(5.0),
-                              ),
-                              child: Text(
-                                angka,
-                                style: TextStyle(fontSize: 16, color: Colors.black),
-                              ),
-                            ),
+                          setState(() {});
+                          lastTapTime = DateTime.now();
+                          lastTappedObject = angkaObj;
+                        },
+                        child: Container(
+                          padding: EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: angkaObj.coloredNumbers[activeColorIndex],
+                            borderRadius: BorderRadius.circular(5.0),
                           ),
-                    ],
+                          child: Text(
+                            angkaObj.value,
+                            style: TextStyle(fontSize: 16, color: Colors.black),
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
                 ),
               ],
@@ -263,16 +278,18 @@ class _MyHomePageState extends State<MyHomePage> {
     );
   }
 
-  List<String> generateRandomNumbers(int jumlah) {
-    List<String> angka = [];
+  List<AngkaObject> generateRandomNumbers(int jumlah) {
+    List<AngkaObject> angkaAcak = [];
+
+    List<String> deretAngka = List.generate(10, (index) => index.toString());
+    deretAngka.shuffle();
 
     for (int i = 0; i < jumlah; i++) {
-      angka.add((1 + i % 9).toString());
+      int index = i % deretAngka.length; // Use modulo to repeat the sequence
+      AngkaObject angkaObj = AngkaObject(deretAngka[index]);
+      angkaAcak.add(angkaObj);
     }
 
-    angka.shuffle();
-
-    return angka;
+    return angkaAcak;
   }
-
 }
